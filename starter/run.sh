@@ -15,8 +15,9 @@
 #
 
 # Validate parameters
-if [[ $1 != "deploy" && $1 != "delete" && $1 != "preview" ]]; then
-    echo "ERROR: Incorrect execution mode. Valid values: deploy, delete, preview." >&2
+if [[ $1 != "deploy" && $1 != "delete" && $1 != "preview" && $1 != "create" && $1 != "update" ]]
+then
+    echo "ERROR: Incorrect execution mode. Valid values: deploy, delete, preview, create, update." >&2
     exit 1
 fi
 
@@ -33,6 +34,7 @@ then
         --stack-name $STACK_NAME \
         --template-file $TEMPLATE_FILE_NAME \
         --parameter-overrides file://$PARAMETERS_FILE_NAME \
+        --capabilities "CAPABILITY_NAMED_IAM"  \
         --region=$REGION
 fi
 if [ $EXECUTION_MODE == "delete" ]
@@ -48,12 +50,22 @@ then
         --template-file $TEMPLATE_FILE_NAME \
         --parameter-overrides file://$PARAMETERS_FILE_NAME \
         --no-execute-changeset \
+        --capabilities "CAPABILITY_NAMED_IAM"  \
         --region=$REGION 
 fi
 if [ $EXECUTION_MODE == "create" ]
 then
     aws cloudformation create-stack \
         --stack-name $STACK_NAME \
+        --template-body file://$TEMPLATE_FILE_NAME   \
+        --parameters file://$PARAMETERS_FILE_NAME  \
+        --capabilities "CAPABILITY_NAMED_IAM"  \
+        --region=$REGION
+fi
+if [ $EXECUTION_MODE == "update" ]
+then
+    aws cloudformation update-stack \
+        --stack-name $STACK_NAME  \
         --template-body file://$TEMPLATE_FILE_NAME   \
         --parameters file://$PARAMETERS_FILE_NAME  \
         --capabilities "CAPABILITY_NAMED_IAM"  \

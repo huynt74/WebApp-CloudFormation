@@ -11,6 +11,10 @@ Parameters:
     Description: Desired capacity for the fleet of instances
     Default: 1
 
+  SubBucketName:
+    Type: String
+    Description: Name Bucket
+
 Resources:
   # Add your resources here
   # We include a portion of the LaunchTemplate resource so you can use the UserData.
@@ -26,7 +30,6 @@ Resources:
         FromPort: 80
         ToPort: 80
         CidrIp: 0.0.0.0/0
-
   WebServerSecGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
@@ -44,7 +47,6 @@ Resources:
         FromPort: 0
         ToPort: 65535
         CidrIp: 0.0.0.0/0
-
   WebAppLaunchTemplate:
     Type: AWS::EC2::LaunchTemplate
     Properties: 
@@ -57,8 +59,9 @@ Resources:
             sudo apt-get install nginx -y
             service nginx start
 
-            # Tạo hoặc ghi đè tệp index.html
-            cat > /var/www/html/index.html <<EOF
+            WEB_DIR="/var/www/html"
+
+            cat <<EOF >index.html 
             <!DOCTYPE html>
             <html>
             <head>
@@ -70,25 +73,11 @@ Resources:
             </html>
             EOF
 
-            # Cấu hình Nginx để phục vụ tệp index.html
-            cat > /etc/nginx/sites-available/default <<EOF
-            server {
-                listen 80 default_server;
-                listen [::]:80 default_server;
+            sudo rm -r $WEB_DIR/index.*
+            sudo cp index.html $WEB_DIR
 
-                root /var/www/html;
-                index index.html index.htm;
+            sudo systemctl reload nginx
 
-                server_name _;
-
-                location / {
-                    try_files $uri $uri/ =404;
-                }
-            }
-            EOF
-
-            # Khởi động lại dịch vụ Nginx để áp dụng cấu hình mới
-            service nginx restart
         ImageId: ami-0e001c9271cf7f3b9
         SecurityGroupIds:
           - !Ref WebServerSecGroup
@@ -99,75 +88,10 @@ Resources:
             VolumeSize: '10'
         IamInstanceProfile:
           Name: !Ref WebAppInstanceProfile
-
-  
-  WebAppGroup:
-    Type: AWS::AutoScaling::AutoScalingGroup
-    Properties:
-      VPCZoneIdentifier:
-      - Fn::ImportValue: 
-          !Sub "${EnvironmentName}-PRIV-NETS"
-      LaunchTemplate:
-        LaunchTemplateId: !Ref WebAppLaunchTemplate
-        Version: !GetAtt WebAppLaunchTemplate.LatestVersionNumber
-      MinSize: '1'
-      DesiredCapacity: !Ref AsgDesiredCapacity
-      MaxSize: '6'
-      TargetGroupARNs:
-      - Ref: WebAppTargetGroup
-
-  WebAppLB:
-    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
-    Properties:
-      Subnets:
-      - Fn::ImportValue: !Sub "${EnvironmentName}-PUB1-SN"
-      - Fn::ImportValue: !Sub "${EnvironmentName}-PUB2-SN"
-      SecurityGroups:
-      - Ref: LBSecGroup
-
-  Listener:
-    Type: AWS::ElasticLoadBalancingV2::Listener
-    Properties:
-      DefaultActions:
-      - Type: forward
-        TargetGroupArn:
-          Ref: WebAppTargetGroup
-      LoadBalancerArn:
-        Ref: WebAppLB
-      Port: '80'
-      Protocol: HTTP
-
-  ALBListenerRule:
-      Type: AWS::ElasticLoadBalancingV2::ListenerRule
-      Properties:
-        Actions:
-        - Type: forward
-          TargetGroupArn: !Ref 'WebAppTargetGroup'
-        Conditions:
-        - Field: path-pattern
-          Values: [/]
-        ListenerArn: !Ref 'Listener'
-        Priority: 1
-
-  WebAppTargetGroup:
-    Type: AWS::ElasticLoadBalancingV2::TargetGroup
-    Properties:
-      HealthCheckIntervalSeconds: 10
-      HealthCheckPath: /
-      HealthCheckProtocol: HTTP
-      HealthCheckTimeoutSeconds: 8
-      HealthyThresholdCount: 2
-      Port: 80
-      Protocol: HTTP
-      UnhealthyThresholdCount: 5
-      VpcId: 
-        Fn::ImportValue:
-          Fn::Sub: "${EnvironmentName}-VPCID"
-      
   S3Bucket:
     Type: AWS::S3::Bucket
     Properties:
-      BucketName: !Sub "udacity-s3-example-with-a-random-suffix"
+      BucketName: !Sub "${SubBucketName}-some-suffix"
       AccessControl: Private
       VersioningConfiguration:
         Status: Enabled
@@ -184,11 +108,10 @@ Resources:
         IgnorePublicAcls: true
         BlockPublicPolicy: true
         RestrictPublicBuckets: true
-
-  IAMRole:
+  WebAppInstanceRole:
     Type: AWS::IAM::Role
     Properties:
-      RoleName: !Ref ExerciseName
+      RoleName: !Sub "${EnvironmentName}-web-servers"
       AssumeRolePolicyDocument:
         Version: '2012-10-17'
         Statement:
@@ -208,11 +131,68 @@ Resources:
               - 's3:PutObject'
               - 's3:GetObject'
               Resource:
-                - !GetAtt S3Bucket.Arn
-
-  InstanceProfile:
+                - !Sub "arn:aws:s3:::any-bucket-name/*"
+  WebAppInstanceProfile:
     Type: AWS::IAM::InstanceProfile
     Properties:
       Path: '/'
       Roles:
-      - !Ref IAMRole
+      - !Ref WebAppInstanceRole
+  WebAppGroup:
+    Type: AWS::AutoScaling::AutoScalingGroup
+    Properties:
+      VPCZoneIdentifier:
+      - Fn::ImportValue: 
+          !Sub "${EnvironmentName}-PRIV-NETS"
+      LaunchTemplate:
+        LaunchTemplateId: !Ref WebAppLaunchTemplate
+        Version: !GetAtt WebAppLaunchTemplate.LatestVersionNumber
+      MinSize: '1'
+      DesiredCapacity: !Ref AsgDesiredCapacity
+      MaxSize: '6'
+      TargetGroupARNs:
+      - !Ref WebAppTargetGroup
+  WebAppLB:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Subnets:
+      - Fn::ImportValue: !Sub "${EnvironmentName}-PUB1-SN"
+      - Fn::ImportValue: !Sub "${EnvironmentName}-PUB2-SN"
+      SecurityGroups:
+      - !Ref LBSecGroup
+  Listener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      DefaultActions:
+      - Type: forward
+        TargetGroupArn:
+          !Ref WebAppTargetGroup
+      LoadBalancerArn:
+        !Ref WebAppLB
+      Port: '80'
+      Protocol: HTTP
+  ALBListenerRule:
+    Type: AWS::ElasticLoadBalancingV2::ListenerRule
+    Properties:
+      Actions:
+      - Type: forward
+        TargetGroupArn: !Ref 'WebAppTargetGroup'
+      Conditions:
+      - Field: path-pattern
+        Values: [/]
+      ListenerArn: !Ref 'Listener'
+      Priority: 1
+  WebAppTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      HealthCheckIntervalSeconds: 10
+      HealthCheckPath: /
+      HealthCheckProtocol: HTTP
+      HealthCheckTimeoutSeconds: 8
+      HealthyThresholdCount: 2
+      Port: 80
+      Protocol: HTTP
+      UnhealthyThresholdCount: 5
+      VpcId: 
+        Fn::ImportValue:
+          Fn::Sub: "${EnvironmentName}-VPCID"
