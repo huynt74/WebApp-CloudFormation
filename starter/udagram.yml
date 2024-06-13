@@ -196,3 +196,10 @@ Resources:
       VpcId: 
         Fn::ImportValue:
           Fn::Sub: "${EnvironmentName}-VPCID"
+
+Outputs:
+  InstanceName:
+    Value: !Ref WebAppLB
+  DNSName: 
+    Description: "DNS name of the load balancer"
+    Value: !GetAtt WebAppLB.DNSName
