@@ -6,7 +6,7 @@
 ./run.sh create us-east-1 high-webapp-servers udagram.yml udagram-parameters.json
 ## Tear down instructions
 ./run.sh delete us-east-1 high-webapp
-./run.sh delete us-east-1 high-webapp-serversp
+./run.sh delete us-east-1 high-webapp-servers
 
 ## Other considerations
 ./run.sh update us-east-1 high-webapp-servers udagram.yml udagram-parameters.json
